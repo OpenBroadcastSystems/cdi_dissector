@@ -59,8 +59,7 @@ function cdi_protocol.dissector(buffer, pinfo, tree)
   subtree:add(senders_name, buffer(i,138))
   i = i + 128 + 10
 
-  if v == 1
-  then
+  if v:bytes():get_index(0) == 1 then
     i = i + 4 -- senders_stream_identifier
   end
 
