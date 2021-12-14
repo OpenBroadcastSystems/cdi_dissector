@@ -60,7 +60,7 @@ function cdi_protocol.dissector(buffer, pinfo, tree)
   i = i + 128 + 10
 
   if v:bytes():get_index(0) == 1 then
-    i = i + 4 -- senders_stream_identifier
+    i = i + 4 -- senders_stream_identifier, removed in v2
   end
 
   subtree:add_le(ctrl_dst_port, buffer(i,2))
