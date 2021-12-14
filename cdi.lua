@@ -58,17 +58,23 @@ function do_checksum(buffer, len, cksum_offset)
 end
 
 function cdi_protocol.dissector(buffer, pinfo, tree)
-  length = buffer:len()
-  if length == 0 then return end
+  local length = buffer:len()
+  local expected_length = 247
+  if length < expected_length then return end
 
   pinfo.cols.protocol = cdi_protocol.name
 
   local subtree = tree:add(cdi_protocol, buffer(), "CDI Protocol Data")
 
-  i = 0
-  v = buffer(i, 1)
+  local i = 0
+  local v = buffer(i, 1)
   subtree:add(version, v)
+  local version = v:bytes():get_index(0)
   i = i + 1
+
+  if version == 1 then expected_length = expected_length + 4 end
+  if length < expected_length then return end
+
   subtree:add(major, buffer(i,1))
   i = i + 1
   subtree:add(probe, buffer(i,1))
@@ -76,6 +82,13 @@ function cdi_protocol.dissector(buffer, pinfo, tree)
   cmd_val = buffer(i,4)
   i = i + 4
   subtree:add_le(cmd, cmd_val)
+
+  if cmd_val:le_uint() == 4 then -- ack
+    expected_length = expected_length + 6
+  else
+    expected_length = expected_length + 1
+  end
+  if length ~= expected_length then return end
 
   subtree:add(senders_ip, buffer(i,64))
   i = i + 64
@@ -89,7 +102,7 @@ function cdi_protocol.dissector(buffer, pinfo, tree)
   subtree:add(senders_name, buffer(i,138))
   i = i + 128 + 10
 
-  if v:bytes():get_index(0) == 1 then
+  if version == 1 then
     i = i + 4 -- senders_stream_identifier, removed in v2
   end
 
