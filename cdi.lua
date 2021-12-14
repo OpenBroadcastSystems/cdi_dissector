@@ -20,12 +20,42 @@ senders_qpn = ProtoField.ipv6("cdi.senders_qpn", "senders_qpn")
 senders_name = ProtoField.string("cdi.senders_name", "senders_name")
 ctrl_dst_port = ProtoField.uint16("cdi.ctrl_dstport", "ctrl_dstport", base.DEC)
 ctrl_pkt_num = ProtoField.uint16("cdi.ctrl_pktnum", "ctrl_pktnum", base.DEC)
-checksum = ProtoField.uint16("cdi.checksum", "checksum", base.DEC)
+checksum = ProtoField.uint16("cdi.checksum", "checksum", base.HEX)
+calculated_checksum = ProtoField.uint16("cdi.calculated_checksum", "calculated_checksum", base.HEX)
 ack_cmd   = ProtoField.int32("cdi.ack_cmd", "ack_cmd", base.DEC, { "Reset", "Ping", "Connected", "Ack", "ProtocolVersion" })
 ack_ctrl_pkt_num = ProtoField.uint16("cdi.ack_ctrl_pktnum", "ack_ctrl_pktnum", base.DEC)
 requires_ack = ProtoField.bool("cdi.requires_ack", "requires_ack")
 
-cdi_protocol.fields = { version, major, probe, cmd, senders_ip, senders_gid, senders_qpn, senders_name, ctrl_dst_port, ctrl_pkt_num, checksum, ack_cmd, ack_ctrl_pkt_num, requires_ack }
+cdi_protocol.fields = { version, major, probe, cmd, senders_ip, senders_gid, senders_qpn, senders_name, ctrl_dst_port, ctrl_pkt_num, checksum, ack_cmd, ack_ctrl_pkt_num, requires_ack, calculated_checksum }
+
+-- checksum field must be zero when calculating checksum itself
+function read_buf(buffer, i, cksum_offset)
+    if i == cksum_offset or i == cksum_offset + 1 then return 0 end
+    return buffer:get_index(i)
+end
+
+function do_checksum(buffer, len, cksum_offset)
+  local cksum = 0
+  local i = 0
+
+  while len > 1 do
+    local a = read_buf(buffer, i, cksum_offset)
+    local b = read_buf(buffer, i + 1, cksum_offset)
+    cksum = cksum + a + b * 2^8
+    len = len - 2
+    i = i + 2
+  end
+
+  if len == 1 then
+    cksum = cksum + read_buf(buffer, i, cksum_offset)
+  end
+
+  cksum = math.floor(cksum / 2^16) + (cksum % 2^16)
+  cksum = cksum + math.floor(cksum / 2^16)
+  cksum = (-1 - cksum) % 2^32
+
+  return cksum % 2^16
+end
 
 function cdi_protocol.dissector(buffer, pinfo, tree)
   length = buffer:len()
@@ -70,8 +100,8 @@ function cdi_protocol.dissector(buffer, pinfo, tree)
   i = i + 2
 
   subtree:add_le(checksum, buffer(i,2))
+  local cksum_offset = i
   i = i + 2
-
 
   if cmd_val:le_uint() == 4 then -- ack
     subtree:add_le(ack_cmd, buffer(i, 4))
@@ -82,6 +112,9 @@ function cdi_protocol.dissector(buffer, pinfo, tree)
     subtree:add(requires_ack, buffer(i, 1))
     i = i + 1
   end
+
+  c = do_checksum(buffer:bytes(0, i), i, cksum_offset)
+  subtree:add_le(calculated_checksum, c)
 end
 
 local udp_port = DissectorTable.get("udp.port")
