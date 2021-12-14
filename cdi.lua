@@ -57,11 +57,42 @@ function do_checksum(buffer, len, cksum_offset)
   return cksum % 2^16
 end
 
-function cdi_protocol.dissector(buffer, pinfo, tree)
+local function heuristic_checker(buffer, pinfo, tree)
   local length = buffer:len()
   local expected_length = 247
   if length < expected_length then return end
 
+  local i = 0
+  local v = buffer(i, 1)
+  local version = v:bytes():get_index(0)
+  i = i + 1
+
+  if version == 1 then expected_length = expected_length + 4 end
+  if length < expected_length then return end
+
+  i = i + 2
+  cmd_val = buffer(i,4)
+  i = i + 4
+
+  local cksum_offset = expected_length - 2
+
+  if cmd_val:le_uint() == 4 then -- ack
+    expected_length = expected_length + 6
+  else
+    expected_length = expected_length + 1
+  end
+  if length ~= expected_length then return false end
+
+
+  local c = do_checksum(buffer:bytes(0, length), length, cksum_offset)
+  local c2 = buffer:bytes():get_index(cksum_offset) + buffer:bytes():get_index(cksum_offset+1) * 2^8
+  if c ~= c2 then return false end
+
+  cdi_protocol.dissector(buffer, pinfo, tree)
+  return true
+end
+
+function cdi_protocol.dissector(buffer, pinfo, tree)
   pinfo.cols.protocol = cdi_protocol.name
 
   local subtree = tree:add(cdi_protocol, buffer(), "CDI Protocol Data")
@@ -72,9 +103,6 @@ function cdi_protocol.dissector(buffer, pinfo, tree)
   local version = v:bytes():get_index(0)
   i = i + 1
 
-  if version == 1 then expected_length = expected_length + 4 end
-  if length < expected_length then return end
-
   subtree:add(major, buffer(i,1))
   i = i + 1
   subtree:add(probe, buffer(i,1))
@@ -82,13 +110,6 @@ function cdi_protocol.dissector(buffer, pinfo, tree)
   cmd_val = buffer(i,4)
   i = i + 4
   subtree:add_le(cmd, cmd_val)
-
-  if cmd_val:le_uint() == 4 then -- ack
-    expected_length = expected_length + 6
-  else
-    expected_length = expected_length + 1
-  end
-  if length ~= expected_length then return end
 
   subtree:add(senders_ip, buffer(i,64))
   i = i + 64
@@ -130,5 +151,4 @@ function cdi_protocol.dissector(buffer, pinfo, tree)
   subtree:add_le(calculated_checksum, c)
 end
 
-local udp_port = DissectorTable.get("udp.port")
-udp_port:add(47593, cdi_protocol)
+cdi_protocol:register_heuristic("udp", heuristic_checker)
